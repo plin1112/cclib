@@ -9,6 +9,7 @@
 
 import sys
 import numpy
+import periodictable
 
 
 # See https://github.com/kachayev/fn.py/commit/391824c43fb388e0eca94e568ff62cc35b543ecb
@@ -70,6 +71,24 @@ def symmetrize(m, use_triangle='lower'):
         ms[lower_indices] = ms[upper_indices]
 
     return ms
+
+
+_BUILTIN_FLOAT = float
+
+
+def float(number):
+    """Convert a string to a float.
+
+    This method should perform certain checks that are specific to cclib,
+    including avoiding the problem with Ds instead of Es in scientific notation.
+    Another point is converting string signifying numerical problems (*****)
+    to something we can manage (Numpy's NaN).
+    """
+
+    if list(set(number)) == ['*']:
+        return numpy.nan
+
+    return _BUILTIN_FLOAT(number.replace("D", "E"))
 
 
 def convertor(value, fromunits, tounits):
@@ -141,30 +160,13 @@ class PeriodicTable(object):
     """Allows conversion between element name and atomic no."""
 
     def __init__(self):
-        self.element = [
-            None,
-            'H', 'He',
-            'Li', 'Be',
-            'B', 'C', 'N', 'O', 'F', 'Ne',
-            'Na', 'Mg',
-            'Al', 'Si', 'P', 'S', 'Cl', 'Ar',
-            'K', 'Ca',
-            'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
-            'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr',
-            'Rb', 'Sr',
-            'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd',
-            'In', 'Sn', 'Sb', 'Te', 'I', 'Xe',
-            'Cs', 'Ba',
-            'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb',
-            'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
-            'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn',
-            'Fr', 'Ra',
-            'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm', 'Md', 'No',
-            'Lr', 'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn',
-            'Uut', 'Fl', 'Uup', 'Lv', 'Uus', 'Uuo']
+        self.element = [None]
         self.number = {}
-        for i in range(1, len(self.element)):
-            self.number[self.element[i]] = i
+        
+        for e in periodictable.elements:
+            if e.symbol != 'n':
+                self.element.append(e.symbol)
+                self.number[e.symbol] = e.number
 
 
 class WidthSplitter:

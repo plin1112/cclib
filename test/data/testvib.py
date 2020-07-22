@@ -66,6 +66,12 @@ class GaussianIRTest(GenericIRTest):
     def testvibsyms(self):
         """Is the length of vibsyms correct?"""
         self.assertEqual(len(self.data.vibsyms), self.numvib)
+        
+    def testzeropointcorrection(self):
+        # reference zero-point correction from dvb_ir.out
+        zpve = 0.1771
+        """Is the zero-point correction correct?"""
+        self.assertAlmostEqual(self.data.zpve, zpve, delta=0.001)
 
 
 class JaguarIRTest(GenericIRTest):
@@ -172,12 +178,34 @@ class GamessIRTest(GenericIRTest):
     """Customized vibrational frequency unittest"""
     # Molecular mass of DVB in mD.
     molecularmass = 130078.25
+    enthalpy_places = 3
+    entropy_places = 6
+    freeenergy_places = 3
 
     def testatommasses(self):
         """Do the atom masses sum up to the molecular mass (130078.25+-0.1mD)?"""
         mm = 1000*sum(self.data.atommasses)
         self.assertAlmostEqual(mm, 130078.25, delta=0.1, msg = "Molecule mass: %f not 130078 +- 0.1mD" % mm)
 
+    def testtemperature(self):
+        """Is the temperature 298.15 K?"""
+        self.assertAlmostEqual(298.15, self.data.temperature)
+
+    def testpressure(self):
+        """Is the pressure 1 atm?"""
+        self.assertAlmostEqual(1, self.data.pressure)
+
+    def testenthalpy(self):
+         """Is the enthalpy reasonable"""
+         self.assertAlmostEqual(-381.86372805188300, self.data.enthalpy, self.enthalpy_places)
+
+    def testentropy(self):
+         """Is the entropy reasonable"""
+         self.assertAlmostEqual(0.00014875961938, self.data.entropy, self.entropy_places)
+
+    def testfreeenergy(self):
+         """Is the freeenergy reasonable"""
+         self.assertAlmostEqual(-381.90808120060200, self.data.freeenergy, self.freeenergy_places)
 
 class GenericIRimgTest(unittest.TestCase):
     """Generic imaginary vibrational frequency unittest"""

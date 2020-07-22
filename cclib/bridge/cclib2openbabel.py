@@ -12,7 +12,12 @@ from cclib.parser.utils import find_package
 
 _found_openbabel = find_package("openbabel")
 if _found_openbabel:
-    import openbabel as ob
+    # The exception idiom is needed because OB < 3.0 doesn't set __version__.
+    # The `try` block is for OB >= 3.0, and `except` is for 2.4.x and older.
+    try:
+        from openbabel import openbabel as ob
+    except:
+        import openbabel as ob
 
 
 def _check_openbabel(found_openbabel):
@@ -38,6 +43,7 @@ def makecclib(mol):
         attributes['atomcoords'].append([atom.GetX(), atom.GetY(), atom.GetZ()])
         attributes['atommasses'].append(atom.GetAtomicMass())
         attributes['atomnos'].append(atom.GetAtomicNum())
+    attributes['atomcoords'] = [attributes['atomcoords']]
     return ccData(attributes)
 
 

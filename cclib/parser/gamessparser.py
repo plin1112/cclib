@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2018, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -82,26 +82,37 @@ class GAMESS(logfileparser.Logfile):
 
     def extract(self, inputfile, line):
         """Extract information from the file object inputfile."""
-        
+
         # Extract the version number. If the calculation is from
         # Firefly, its version number comes before a line that looks
         # like the normal GAMESS version number...
         if "Firefly version" in line:
             match = re.search(r"Firefly version\s([\d.]*)\D*(\d*)\s*\*", line)
             if match:
-                version, build = match.groups()
-                package_version = "{}.b{}".format(version, build)
+                base_version, build = match.groups()
+                package_version = "{}+{}".format(base_version, build)
                 self.metadata["package_version"] = package_version
-        if "GAMESS VERSION" in line:
+                self.metadata["legacy_package_version"] = base_version
+        if "GAMESS VERSION =" in line:
             # ...so avoid overwriting it if Firefly already set this field.
             if "package_version" not in self.metadata:
                 tokens = line.split()
-                self.metadata["package_version"] = ' '.join(tokens[4:-1])
+                day, month, year = tokens[4:7]
+                possible_release = tokens[-2]
+                # There may not be a (Rn) for the nth release that year, in
+                # which case this index is the same as 7 (the year).
+                if possible_release == year:
+                    release = "1"
+                else:
+                    # `(R23)` -> 23
+                    release = possible_release[2:-1]
+                self.metadata["package_version"] = '{}.r{}'.format(year, release)
+                self.metadata["legacy_package_version"] = "{}R{}".format(year, release)
 
         if line[1:12] == "INPUT CARD>":
             return
 
-        # extract the methods 
+        # extract the methods
         if line[1:7] == "SCFTYP":
             method = line.split()[0][7:]
             if len(self.metadata["methods"]) == 0:
@@ -271,6 +282,9 @@ class GAMESS(logfileparser.Logfile):
                     self.metadata["methods"].append("CCSD(T)")
                     ccenergy = float(line.split()[2])
             self.ccenergies.append(utils.convertor(ccenergy, "hartree", "eV"))
+
+        if "T1 DIAGNOSTIC" in line:
+            self.metadata["t1_diagnostic"] = float(line.split()[3])
 
         # Also collect MP2 energies, which are always calculated before CC
         if line[8:23] == "MBPT(2) ENERGY:":
@@ -737,12 +751,12 @@ class GAMESS(logfileparser.Logfile):
         # MODES 1 TO 6 ARE TAKEN AS ROTATIONS AND TRANSLATIONS.
         #
         #     FREQUENCIES IN CM**-1, IR INTENSITIES IN DEBYE**2/AMU-ANGSTROM**2
-        #     RAMAN INTENSITIES IN ANGSTROM**4/AMU, DEPOLARIZATIONS ARE DIMENSIONLESS
+        #     RAMAN ACTIVITIES IN ANGSTROM**4/AMU, DEPOLARIZATIONS ARE DIMENSIONLESS
         #
         #                          1           2           3           4           5
         #       FREQUENCY:         5.89        1.46        0.04        0.03        0.01
         #    IR INTENSITY:      0.00000     0.00000     0.00000     0.00000     0.00000
-        # RAMAN INTENSITY:       12.675       1.828       0.000       0.000       0.000
+        # RAMAN ACTIVITY:       12.675       1.828       0.000       0.000       0.000
         #  DEPOLARIZATION:        0.750       0.750       0.124       0.009       0.750
         #
         # If GAMESS-US or PC-GAMESS has not reached the stationary point we have
@@ -1052,7 +1066,7 @@ class GAMESS(logfileparser.Logfile):
                     self.mosyms[0].extend(list(map(self.normalisesym, line.split())))
 
                 # Now we have nbasis lines. We will use the same method as in normalise_aonames() before.
-                p = re.compile("(\d+)\s*([A-Z][A-Z]?)\s*(\d+)\s*([A-Z]+)")
+                p = re.compile(r"(\d+)\s*([A-Z][A-Z]?)\s*(\d+)\s*([A-Z]+)")
                 oldatom = '0'
                 i_atom = 0  # counter to keep track of n_atoms > 99
                 flag_w = True  # flag necessary to keep from adding 100's at wrong time
@@ -1450,6 +1464,73 @@ class GAMESS(logfileparser.Logfile):
                     i, j = coord_to_idx[tokens[1][0]], coord_to_idx[tokens[1][1]]
                     polarizability[i, j] = tokens[3]
             self.polarizabilities.append(polarizability)
+
+        # Extract thermochemistry
+
+        #      -------------------------------
+        #      THERMOCHEMISTRY AT T=  298.15 K
+        #      -------------------------------
+
+        #  USING IDEAL GAS, RIGID ROTOR, HARMONIC NORMAL MODE APPROXIMATIONS.
+        #  P=  1.01325E+05 PASCAL.
+        #  ALL FREQUENCIES ARE SCALED BY   1.00000
+        #  THE MOMENTS OF INERTIA ARE (IN AMU*BOHR**2)
+        #               1.77267             4.73429             6.50696
+        #  THE ROTATIONAL SYMMETRY NUMBER IS  1.0
+        #  THE ROTATIONAL CONSTANTS ARE (IN GHZ)
+        #    1017.15677   380.85747   277.10144
+        #       7 -      9 VIBRATIONAL MODES ARE USED IN THERMOCHEMISTRY.
+        #  THE HARMONIC ZERO POINT ENERGY IS (SCALED BY   1.000)
+        #         0.020711 HARTREE/MOLECULE     4545.618665 CM**-1/MOLECULE 
+        #        12.996589 KCAL/MOL               54.377728 KJ/MOL
+
+        #                Q               LN Q
+        #  ELEC.     1.00000E+00       0.000000
+        #  TRANS.    3.00431E+06      14.915558
+        #  ROT.      8.36512E+01       4.426656
+        #  VIB.      1.00067E+00       0.000665
+        #  TOT.      2.51481E+08      19.342880
+
+        #               E         H         G         CV        CP        S
+        #            KJ/MOL    KJ/MOL    KJ/MOL   J/MOL-K   J/MOL-K   J/MOL-K
+        #  ELEC.      0.000     0.000     0.000     0.000     0.000     0.000
+        #  TRANS.     3.718     6.197   -36.975    12.472    20.786   144.800
+        #  ROT.       3.718     3.718   -10.973    12.472    12.472    49.277
+        #  VIB.      54.390    54.390    54.376     0.296     0.296     0.046
+        #  TOTAL     61.827    64.306     6.428    25.240    33.554   194.123
+        #  VIB. THERMAL CORRECTION E(T)-E(0) = H(T)-H(0) =        12.071 J/MOL
+
+        #               E         H         G         CV        CP        S
+        #          KCAL/MOL  KCAL/MOL  KCAL/MOL CAL/MOL-K CAL/MOL-K CAL/MOL-K
+        #  ELEC.      0.000     0.000     0.000     0.000     0.000     0.000
+        #  TRANS.     0.889     1.481    -8.837     2.981     4.968    34.608
+        #  ROT.       0.889     0.889    -2.623     2.981     2.981    11.777
+        #  VIB.      12.999    12.999    12.996     0.071     0.071     0.011
+        #  TOTAL     14.777    15.369     1.536     6.032     8.020    46.396
+        #  VIB. THERMAL CORRECTION E(T)-E(0) = H(T)-H(0) =         2.885 CAL/MOL        
+
+        if "THERMOCHEMISTRY AT T=" in line:
+            match = re.search(r"THERMOCHEMISTRY AT T=(.*)K", line)
+            if match:
+                self.set_attribute('temperature', float(match.group(1)))
+        if "PASCAL." in line:
+            match = re.search(r"P=(.*)PASCAL.", line)
+            if match:
+                self.set_attribute('pressure', float(match.group(1))/1.01325e5)
+
+        if "KCAL/MOL  KCAL/MOL  KCAL/MOL CAL/MOL-K CAL/MOL-K CAL/MOL-K" in line:
+            self.skip_lines(inputfile,["ELEC","TRANS","ROT","VIB"])
+            line = next(inputfile) #TOTAL
+            thermoValues = line.split()
+
+            if hasattr(self, 'scfenergies'):
+                electronicEnergy = utils.convertor(self.scfenergies[-1],"eV","hartree")
+            else:
+                electronicEnergy = 0  # GAMESS  prints thermochemistry at the end, so it should have a value for this already
+            self.set_attribute('enthalpy', electronicEnergy + utils.convertor(float(thermoValues[2]),"kcal/mol","hartree"))
+            self.set_attribute('freeenergy', electronicEnergy + utils.convertor(float(thermoValues[3]),"kcal/mol","hartree"))
+            self.set_attribute('entropy', utils.convertor(float(thermoValues[6])/1000.0,"kcal/mol","hartree"))
+
 
         if line[:30] == ' ddikick.x: exited gracefully.'\
                 or line[:41] == ' EXECUTION OF FIREFLY TERMINATED NORMALLY'\

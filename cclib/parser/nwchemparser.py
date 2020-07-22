@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -42,12 +42,17 @@ class NWChem(logfileparser.Logfile):
     def extract(self, inputfile, line):
         """Extract information from the file object inputfile."""
 
-        # Extract the version number.
+        # Extract the version number and the version control information, if
+        # it exists.
         if "nwchem branch" in line:
-            self.metadata["package_version"] = line.split()[3]
-        # Don't add revision information to the main package version for now.
-        if "nwchem revision" in line:
-            revision = line.split()[3]
+            base_package_version = line.split()[3]
+            self.metadata["legacy_package_version"] = base_package_version
+            self.metadata["package_version"] = base_package_version
+            line = next(inputfile)
+            if "nwchem revision" in line:
+                self.metadata["package_version"] = "{}+{}".format(
+                    self.metadata["package_version"], line.split()[3].split("-")[-1]
+                )
 
         # This is printed in the input module, so should always be the first coordinates,
         # and contains some basic information we want to parse as well. However, this is not
@@ -201,7 +206,7 @@ class NWChem(logfileparser.Logfile):
         # It also appears that we have to handle cartesian vs. spherical
 
         if line[1:11] == "Summary of":
-            match = re.match(' Summary of "([^\"]*)" -> "([^\"]*)" \((.+)\)', line)
+            match = re.match(r' Summary of "([^\"]*)" -> "([^\"]*)" \((.+)\)', line)
 
             if match and match.group(1) == match.group(2):
 
@@ -281,11 +286,11 @@ class NWChem(logfileparser.Logfile):
 
                 # These will be present only in the DFT module.
                 if "Convergence on energy requested" in line:
-                    target_energy = self.float(line.split()[-1])
+                    target_energy = utils.float(line.split()[-1])
                 if "Convergence on density requested" in line:
-                    target_density = self.float(line.split()[-1])
+                    target_density = utils.float(line.split()[-1])
                 if "Convergence on gradient requested" in line:
-                    target_gradient = self.float(line.split()[-1])
+                    target_gradient = utils.float(line.split()[-1])
 
                 line = next(inputfile)
 
@@ -372,7 +377,7 @@ class NWChem(logfileparser.Logfile):
                     line = next(inputfile)
                     while line.strip():
                         it, energy, gnorm, gmax, time = line.split()
-                        gnorm = self.float(gnorm)
+                        gnorm = utils.float(gnorm)
                         values.append([gnorm])
                         try:
                             line = next(inputfile)
@@ -422,9 +427,9 @@ class NWChem(logfileparser.Logfile):
                 # ...
                 if len(line[17:].split()) == 6:
                     iter, energy, deltaE, dens, diis, time = line[17:].split()
-                    val_energy = self.float(deltaE)
-                    val_density = self.float(dens)
-                    val_gradient = self.float(diis)
+                    val_energy = utils.float(deltaE)
+                    val_density = utils.float(dens)
+                    val_gradient = utils.float(diis)
                     values.append([val_energy, val_density, val_gradient])
 
                 try:
@@ -622,7 +627,7 @@ class NWChem(logfileparser.Logfile):
                 nvectors.append(nvector)
 
                 # A nonzero occupancy for SCF jobs means the orbital is occupied.
-                mooccno = int(self.float(line[18:30]))
+                mooccno = int(utils.float(line[18:30]))
                 mooccnos.append(mooccno)
 
                 # If the printout does not start from the first MO, assume None for all previous orbitals.
@@ -630,7 +635,7 @@ class NWChem(logfileparser.Logfile):
                     for i in range(1, nvector):
                         energies.append(None)
 
-                energy = self.float(line[34:47])
+                energy = utils.float(line[34:47])
                 energy = utils.convertor(energy, "hartree", "eV")
                 energies.append(energy)
 
@@ -1015,21 +1020,20 @@ class NWChem(logfileparser.Logfile):
             self.mpenergies.append([])
             self.mpenergies[-1].append(utils.convertor(mpenerg, "hartree", "eV"))
 
-        if "CCSD total energy / hartree" in line or "total CCSD energy:" in line:
-            self.metadata["methods"].append("CCSD")
-            ccenerg = float(line.split()[-1])
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
-            self.ccenergies.append([])
-            self.ccenergies[-1].append(utils.convertor(ccenerg, "hartree", "eV"))
-
-        if "CCSD(T) total energy / hartree" in line:
-            self.metadata["methods"].append("CCSD(T)")
-            ccenerg = float(line.split()[-1])
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
-            self.ccenergies.append([])
-            self.ccenergies[-1].append(utils.convertor(ccenerg, "hartree", "eV"))
+        if line.strip() == "NWChem Extensible Many-Electron Theory Module":
+            ccenergies = []
+            while "Parallel integral file used" not in line:
+                line = next(inputfile)
+                if "CCSD total energy / hartree" in line or "total CCSD energy:" in line:
+                    self.metadata["methods"].append("CCSD")
+                    ccenergies.append(float(line.split()[-1]))
+                if "CCSD(T) total energy / hartree" in line:
+                    self.metadata["methods"].append("CCSD(T)")
+                    ccenergies.append(float(line.split()[-1]))
+            if ccenergies:
+                self.append_attribute(
+                    "ccenergies", utils.convertor(ccenergies[-1], "hartree", "eV")
+                )
 
         # Static and dynamic polarizability.
         if "Linear Response polarizability / au" in line:
@@ -1093,7 +1097,7 @@ class NWChem(logfileparser.Logfile):
         # for matching the shells
         table = utils.PeriodicTable()
         elements = [table.element[x] for x in self.atomnos]
-        pattern = re.compile("(\ds)+(\dp)*(\dd)*(\df)*(\dg)*")
+        pattern = re.compile(r"(\ds)+(\dp)*(\dd)*(\df)*(\dg)*")
 
         labels = {}
         labels['s'] = ["%iS"]

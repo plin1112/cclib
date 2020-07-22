@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2019, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -38,6 +38,9 @@ class ccData(object):
         entropy -- entropy (float, hartree/particle)
         etenergies -- energies of electronic transitions (array[1], 1/cm)
         etoscs -- oscillator strengths of electronic transitions (array[1])
+        etdips -- electric transition dipoles of electronic transitions (array[2], ebohr)
+        etveldips -- velocity-gauge electric transition dipoles of electronic transitions (array[2], ebohr)
+        etmagdips -- magnetic transition dipoles of electronic transitions (array[2], ebohr)
         etrotats -- rotatory strengths of electronic transitions (array[1], ??)
         etsecs -- singly-excited configurations for electronic transitions (list of lists)
         etsyms -- symmetries of electronic transitions (list of string)
@@ -69,11 +72,11 @@ class ccData(object):
         optdone -- flags whether an optimization has converged (Boolean)
         optstatus -- optimization status for each set of atomic coordinates (array[1])
         polarizabilities -- (dipole) polarizabilities, static or dynamic (list of arrays[2])
-        pressure -- temperature used for Thermochemistry (float, atm)
+        pressure -- pressure used for Thermochemistry (float, atm)
         scancoords -- geometries of each scan step (array[3], angstroms)
         scanenergies -- energies of potential energy surface (list)
         scannames -- names of varaibles scanned (list of strings)
-        scanparm -- values of parameters in potential energy surface (list of tuples)
+        scanparm -- values of parameters in potential energy surface (list of lists)
         scfenergies -- molecular electronic energies after SCF (Hartree-Fock, DFT) (array[1], eV)
         scftargets -- targets for convergence of the SCF (array[2])
         scfvalues -- current values for convergence of the SCF (list of arrays[2])
@@ -85,8 +88,9 @@ class ccData(object):
         vibdisps -- cartesian displacement vectors (array[3], delta angstrom)
         vibfreqs -- vibrational frequencies (array[1], 1/cm)
         vibirs -- IR intensities (array[1], km/mol)
-        vibramans -- Raman intensities (array[1], A^4/Da)
+        vibramans -- Raman activities (array[1], A^4/Da)
         vibsyms -- symmetries of vibrations (list of strings)
+        zpve -- zero-point vibrational energy correction (float, hartree/particle)
     (1) The term 'array' refers to a numpy array
     (2) The number of dimensions of an array is given in square brackets
     (3) Python indexes arrays/lists starting at zero, so if homos==[10], then
@@ -112,6 +116,9 @@ class ccData(object):
        "entropy":          Attribute(float,            'entropy',                     'properties'),
        "etenergies":       Attribute(numpy.ndarray,    'electronic transitions',      'transitions'),
        "etoscs":           Attribute(numpy.ndarray,    'oscillator strength',         'transitions'),
+       "etdips":           Attribute(numpy.ndarray,    'electic transition dipoles',  'transitions'),
+       "etveldips":        Attribute(numpy.ndarray,    'velocity-gauge electric transition dipoles', 'transitions'),
+       "etmagdips":        Attribute(numpy.ndarray,    'magnetic transition dipoles', 'transitions'),
        "etrotats":         Attribute(numpy.ndarray,    'rotatory strength',           'transitions'),
        "etsecs":           Attribute(list,             'one excited config',          'transitions'),
        "etsyms":           Attribute(list,             'symmetry',                    'transitions'),
@@ -159,7 +166,8 @@ class ccData(object):
        "vibfreqs":         Attribute(numpy.ndarray,    'frequencies',                 'vibrations'),
        "vibirs":           Attribute(numpy.ndarray,    'IR',                          'vibrations:intensities'),
        "vibramans":        Attribute(numpy.ndarray,    'raman',                       'vibrations:intensities'),
-       "vibsyms":          Attribute(list,             'vibration symmetry',          'vibrations')
+       "vibsyms":          Attribute(list,             'vibration symmetry',          'vibrations'),
+       "zpve":             Attribute(float,            'zero-point correction',       'properties:energies')
     }
 
     # The name of all attributes can be generated from the dictionary above.

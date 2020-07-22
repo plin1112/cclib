@@ -183,8 +183,20 @@ class GaussianSPunTest(GenericSPunTest):
         """Does atomnos have the right dimension (20)?"""
         size = len(self.data.atomnos)
         self.assertEqual(size, 20)
+    
+    def testatomcharges(self):
+        """Are atomcharges (at least Mulliken) consistent with natom and sum to one?"""
+        for type_ in set(['mulliken'] + list(self.data.atomcharges.keys())):
+            charges = self.data.atomcharges[type_]
+            self.assertEqual(len(charges), self.data.natom)
+            self.assertAlmostEqual(sum(charges), 1.0, delta=0.001)
 
+    def testatomspins(self):
+        spins = self.data.atomspins['mulliken']
+        self.assertEqual(len(spins), self.data.natom)
+        self.assertAlmostEqual(sum(spins), 1.0, delta=0.001)
 
+            
 class JaguarSPunTest(GenericSPunTest):
     """Customized unrestricted single point unittest"""
 

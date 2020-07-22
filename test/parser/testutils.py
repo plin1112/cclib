@@ -50,8 +50,9 @@ class PeriodicTableTest(unittest.TestCase):
         """Does the periodic table give correct elements?"""
         self.assertEqual(self.pt.element[6], 'C')
         self.assertEqual(self.pt.element[44], 'Ru')
+        self.assertIsNone(self.pt.element[0])
 
-    def test_elements(self):
+    def test_numbers(self):
         """Does the periodic table give correct atom numbers?"""
         self.assertEqual(self.pt.number['C'], 6)
         self.assertEqual(self.pt.number['Au'], 79)

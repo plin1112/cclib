@@ -10,22 +10,38 @@ Importing cclib and parsing a file is a few lines of Python code, making it simp
 
 .. code-block:: python
 
-  import cclib
+  >>> import cclib
 
-  filename = "logfile.out"
-  parser = cclib.io.ccopen(filename)
-  data = parser.parse()
-  print("There are %i atoms and %i MOs" % (data.natom, data.nmo))
+  >>> filename = "water.out"
+  >>> parser = cclib.io.ccopen(filename)
+  >>> data = parser.parse()
+  >>> print("There are %i atoms and %i MOs" % (data.natom, data.nmo))
+
+  There are 3 atoms and 7 MOs
 
 A newer command, ``ccread``, combines both the format detection and parsing steps:
 
 .. code-block:: python
 
-  import cclib
+  >>> import cclib
 
-  filename = "logfile.out"
-  data = cclib.io.ccread(filename)
-  print("There are %i atoms and %i MOs" % (data.natom, data.nmo))
+  >>> filename = "logfile.out"
+  >>> data = cclib.io.ccread(filename)
+  >>> print("There are %i atoms and %i MOs" % (data.natom, data.nmo))
+
+  There are 3 atoms and 7 MOs
+
+The `data` object above contains all the information cclib was able to to parse from the output file, available as attributes on the object:
+
+.. code-block:: python
+
+  >>> dir(data)
+
+  [(...), 'atomcoords', 'atommasses', 'atomnos', 'charge', (...), 'mult', 'natom, 'nbasis', ...]
+
+You can find a full list of these attribute on the `parsed data`_ page.
+
+.. _`parsed data`: data.html
 
 From command line
 +++++++++++++++++
@@ -232,7 +248,9 @@ Since the pandas library is not a dependency of cclib, `it must be installed <ht
 
 A complete data table can be parsed from many output files by following this format::
 
-    ccframe -O <OutputDest> <CompChemLogFile> [<CompChemLogFile>...]
+    ccframe [--force|-f] -O <OutputDest> <CompChemLogFile> [<CompChemLogFile>...]
 
 The argument for ``-O`` indicates the data file to be written and its extension specifies the filetype (e.g. csv, h5/hdf/hdf5, json, pickle/pkl, xlsx).
+An error will be thrown if ``<OutputDest>`` already exists, but you can force overwriting by using the ``--force`` (or ``-f``) flag.
 Since higher-dimensional attributes (e.g. ``atomcoords``) are handled as plain text in some file formats (such as Excel XLSX or CSV), we recommend storing JSON or HDF5 files.
+Observe that the output data file is overwritten if it exits already.

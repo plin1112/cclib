@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -10,8 +10,10 @@
 
 from __future__ import print_function
 
-import numpy
 import re
+
+import numpy
+from packaging.version import parse as parse_version
 
 from cclib.parser import logfileparser
 from cclib.parser import utils
@@ -52,7 +54,15 @@ class ORCA(logfileparser.Logfile):
 
         # Extract the version number.
         if "Program Version" == line.strip()[:15]:
-            self.metadata["package_version"] = line.split()[2]
+            # Handle development versions.
+            self.metadata["legacy_package_version"] = line.split()[2]
+            self.metadata["package_version"] = self.metadata["legacy_package_version"].replace(".x", "dev")
+            possible_revision_line = next(inputfile)
+            if "SVN: $Rev" in possible_revision_line:
+                self.metadata["package_version"] += "+{}".format(
+                    re.search(r"\d+", possible_revision_line).group()
+                )
+
 
         # ================================================================================
         #                                         WARNINGS
@@ -173,7 +183,7 @@ class ORCA(logfileparser.Logfile):
                                 continue
                             if line[0] == '#' or line.strip(' ') == '\n':
                                 continue
-                            if line[0] == '*' or line.strip() == "end":
+                            if line.strip()[0] == '*' or line.strip() == "end":
                                 break
                             # Strip basis specification that can appear after coordinates
                             line = line.split('newGTO')[0].strip()
@@ -370,6 +380,79 @@ class ORCA(logfileparser.Logfile):
                 target = float(line.split()[-2])
                 self.geotargets_names.append(name)
                 self.geotargets.append(target)
+        
+
+        # Moller-Plesset energies.
+        #
+        # ---------------------------------------
+        # MP2 TOTAL ENERGY:      -76.112119693 Eh
+        # ---------------------------------------
+        if 'MP2 TOTAL ENERGY' in line[:16]:
+
+            if not hasattr(self, 'mpenergies'):
+                self.metadata['methods'].append('MP2')
+                self.mpenergies = []
+
+            self.mpenergies.append([])
+            mp2energy = utils.float(line.split()[-2])
+            self.mpenergies[-1].append(utils.convertor(mp2energy, 'hartree', 'eV'))
+
+        # MP2 energy output line is different for MP3, since it uses the MDCI
+        # code, which is also in charge of coupled cluster.
+        #
+        # MP3 calculation:
+        # E(MP2)  =    -76.112119775   EC(MP2)=    -0.128216417
+        # E(MP3)  =    -76.113783480   EC(MP3)=    -0.129880122  E3=    -0.001663705
+        #
+        # CCSD calculation:
+        # E(MP2)                                     ...     -0.393722942
+        # Initial E(tot)                             ...  -1639.631576169
+        # <T|T>                                      ...      0.087231847
+        # Number of pairs included                   ... 55
+        # Total number of pairs                      ... 55
+        if 'E(MP2)' in line:
+
+            if not hasattr(self, 'mpenergies'):
+                self.mpenergies = []
+
+            self.mpenergies.append([])
+            mp2energy = utils.float(line.split()[-1])
+            self.mpenergies[-1].append(utils.convertor(mp2energy, 'hartree', 'eV'))
+
+            line = next(inputfile)
+            if line[:6] == 'E(MP3)':
+                self.metadata['methods'].append('MP3')
+                mp3energy = utils.float(line.split()[2])
+                self.mpenergies[-1].append(utils.convertor(mp3energy, 'hartree', 'eV'))
+            else:
+                assert line[:14] == 'Initial E(tot)'
+
+        # ----------------------
+        # COUPLED CLUSTER ENERGY
+        # ----------------------
+        #
+        # E(0)                                       ...  -1639.237853227
+        # E(CORR)                                    ...     -0.360153516
+        # E(TOT)                                     ...  -1639.598006742
+        # Singles Norm <S|S>**1/2                    ...      0.176406354  
+        # T1 diagnostic                              ...      0.039445660  
+        if line[:22] == 'COUPLED CLUSTER ENERGY':
+            self.skip_lines(inputfile, ['d', 'b'])
+            line = next(inputfile)
+            assert line[:4] == 'E(0)'
+            scfenergy = utils.convertor(utils.float(line.split()[-1]), 'hartree', 'eV')
+            line = next(inputfile)
+            assert line[:7] == 'E(CORR)'
+            while 'E(TOT)' not in line:
+                line = next(inputfile)
+            self.append_attribute(
+                'ccenergies',
+                utils.convertor(utils.float(line.split()[-1]), 'hartree', 'eV')
+            )
+            line = next(inputfile)
+            assert line[:23] == 'Singles Norm <S|S>**1/2'
+            line = next(inputfile)
+            self.metadata["t1_diagnostic"] = utils.float(line.split()[-1])
 
         # ------------------
         # CARTESIAN GRADIENT
@@ -378,21 +461,30 @@ class ORCA(logfileparser.Logfile):
         # 1   H   :    0.000000004    0.019501450   -0.021537091
         # 2   O   :    0.000000054   -0.042431648    0.042431420
         # 3   H   :    0.000000004    0.021537179   -0.019501388
-        if line[:18] == 'CARTESIAN GRADIENT':
-            next(inputfile)
-            next(inputfile)
+        #
+        # ORCA MP2 module has different signal than 'CARTESIAN GRADIENT'.
+        #
+        # The final MP2 gradient
+        # 0:   0.01527469  -0.00292883   0.01125000
+        # 1:   0.00098782  -0.00040549   0.00196825
+        # 2:  -0.01626251   0.00333431  -0.01321825
+        if line[:18] == 'CARTESIAN GRADIENT' or line[:22] == 'The final MP2 gradient':
 
             grads = []
+            if line[:18] == 'CARTESIAN GRADIENT':
+                self.skip_lines(inputfile, ['dashes', 'blank'])
+
             line = next(inputfile).strip()
             while line:
-                idx, atom, colon, x, y, z = line.split()
-                grads.append((float(x), float(y), float(z)))
-
+                tokens = line.split()
+                x, y, z = float(tokens[-3]), float(tokens[-2]), float(tokens[-1])
+                grads.append((x, y, z))
                 line = next(inputfile).strip()
 
             if not hasattr(self, 'grads'):
                 self.grads = []
             self.grads.append(grads)
+
 
         # After each geometry optimization step, ORCA prints the current convergence
         # parameters and the targets (again), so it is a good idea to check that they
@@ -414,9 +506,6 @@ class ORCA(logfileparser.Logfile):
         #
         if line[33:53] == "Geometry convergence":
 
-            if not hasattr(self, "geovalues"):
-                self.geovalues = []
-
             headers = next(inputfile)
             dashes = next(inputfile)
 
@@ -424,10 +513,12 @@ class ORCA(logfileparser.Logfile):
             values = []
             targets = []
             line = next(inputfile)
-            while list(set(line.strip())) != ["."]:
+            # Handle both the dots only and dashes only cases
+            while len(list(set(line.strip()))) != 1:
                 name = line[10:28].strip().lower()
-                value = float(line.split()[2])
-                target = float(line.split()[3])
+                tokens = line.split()
+                value = float(tokens[2])
+                target = float(tokens[3])
                 names.append(name)
                 values.append(value)
                 targets.append(target)
@@ -449,7 +540,7 @@ class ORCA(logfileparser.Logfile):
                     newvalues.append(values[names.index(n)])
                     assert targets[names.index(n)] == self.geotargets[i]
 
-            self.geovalues.append(newvalues)
+            self.append_attribute("geovalues", newvalues)
 
         """ Grab cartesian coordinates
         ---------------------------------
@@ -649,7 +740,7 @@ class ORCA(logfileparser.Logfile):
 
                         # This regex will tease out all number with exactly
                         # six digits after the decimal point.
-                        coeffs = re.findall('-?\d+\.\d{6}', line)
+                        coeffs = re.findall(r'-?\d+\.\d{6}', line)
 
                         # Something is very wrong if this does not hold.
                         assert len(coeffs) <= 6
@@ -709,15 +800,39 @@ class ORCA(logfileparser.Logfile):
                 self.gbasis.append(gbasis_tmp[bas_atname])
             del self.tmp_atnames
 
-        """ Banner announcing Thermochemistry
+        """
         --------------------------
         THERMOCHEMISTRY AT 298.15K
         --------------------------
-        """
-        if 'THERMOCHEMISTRY AT' == line[:18]:
 
-            next(inputfile)
-            next(inputfile)
+        Temperature         ... 298.15 K
+        Pressure            ... 1.00 atm
+        Total Mass          ... 130.19 AMU
+
+        Throughout the following assumptions are being made:
+          (1) The electronic state is orbitally nondegenerate
+          ...
+
+        freq.      45.75  E(vib)   ...       0.53 
+        freq.      78.40  E(vib)   ...       0.49
+        ...
+
+
+        ------------
+        INNER ENERGY
+        ------------
+
+        The inner energy is: U= E(el) + E(ZPE) + E(vib) + E(rot) + E(trans)
+             E(el)   - is the total energy from the electronic structure calc
+             ...
+
+        Summary of contributions to the inner energy U:
+        Electronic energy                ...   -382.05075804 Eh
+        ...
+        """
+        if line.strip().startswith('THERMOCHEMISTRY AT'):
+
+            self.skip_lines(inputfile, ['dashes', 'blank'])
             self.temperature = float(next(inputfile).split()[2])
             self.pressure = float(next(inputfile).split()[2])
             total_mass = float(next(inputfile).split()[3])
@@ -726,36 +841,52 @@ class ORCA(logfileparser.Logfile):
             line = next(inputfile)
             while line[:17] != 'Electronic energy':
                 line = next(inputfile)
-            self.zpe = next(inputfile).split()[4]
+            self.electronic_energy = float(line.split()[3])
+            self.zpe = float(next(inputfile).split()[4])
             thermal_vibrational_correction = float(next(inputfile).split()[4])
             thermal_rotional_correction = float(next(inputfile).split()[4])
             thermal_translational_correction = float(next(inputfile).split()[4])
-            next(inputfile)
+            self.skip_lines(inputfile, ['dashes'])
             total_thermal_energy = float(next(inputfile).split()[3])
 
             # Enthalpy
-            line = next(inputfile)
             while line[:17] != 'Total free energy':
                 line = next(inputfile)
             thermal_enthalpy_correction = float(next(inputfile).split()[4])
             next(inputfile)
-            self.enthalpy = float(next(inputfile).split()[3])
+
+            # For a single atom, ORCA provides the total free energy or inner energy
+            # which includes a spurious vibrational correction (see #817 for details).
+            if self.natom > 1:
+                self.enthalpy = float(next(inputfile).split()[3])
+            else:
+                self.enthalpy = self.electronic_energy + thermal_translational_correction
 
             # Entropy
-            line = next(inputfile)
             while line[:18] != 'Electronic entropy':
                 line = next(inputfile)
             electronic_entropy = float(line.split()[3])
             vibrational_entropy = float(next(inputfile).split()[3])
             rotational_entropy = float(next(inputfile).split()[3])
             translational_entropy = float(next(inputfile).split()[3])
-            next(inputfile)
-            self.entropy = float(next(inputfile).split()[4])
+            self.skip_lines(inputfile, ['dashes'])
 
-            line = next(inputfile)
-            while line[:25] != 'Final Gibbs free enthalpy':
+            # ORCA prints -inf for single atom entropy.
+            if self.natom > 1:
+                self.entropy = float(next(inputfile).split()[4])
+            else:
+                self.entropy = (electronic_entropy + translational_entropy) / self.temperature
+
+            while (line[:25] != 'Final Gibbs free enthalpy') and (line[:23] != 'Final Gibbs free energy'):
                 line = next(inputfile)
-            self.freeenergy = float(line.split()[5])
+            self.skip_lines(inputfile, ['dashes'])
+
+
+            # ORCA prints -inf for sinle atom free energy.
+            if self.natom > 1:
+                self.freeenergy = float(line.split()[5])
+            else:
+                self.freeenergy = self.enthalpy - self.temperature * self.entropy
 
         # Read TDDFT information
         if any(x in line for x in ("TD-DFT/TDA EXCITED", "TD-DFT EXCITED")):
@@ -767,10 +898,9 @@ class ORCA(logfileparser.Logfile):
             else:
                 sym = "Not specified"
 
-            if not hasattr(self, "etenergies"):
-                self.etsecs = []
-                self.etenergies = []
-                self.etsyms = []
+            etsecs = []
+            etenergies = []
+            etsyms = []
 
             lookup = {'a': 0, 'b': 1}
             line = next(inputfile)
@@ -779,8 +909,8 @@ class ORCA(logfileparser.Logfile):
             # Contains STATE or is blank
             while line.find("STATE") >= 0:
                 broken = line.split()
-                self.etenergies.append(float(broken[-2]))
-                self.etsyms.append(sym)
+                etenergies.append(float(broken[-2]))
+                etsyms.append(sym)
                 line = next(inputfile)
                 sec = []
                 # Contains SEC or is blank
@@ -798,8 +928,12 @@ class ORCA(logfileparser.Logfile):
                         contrib = numpy.nan
                     sec.append([start, end, contrib])
                     line = next(inputfile)
-                self.etsecs.append(sec)
+                etsecs.append(sec)
                 line = next(inputfile)
+
+            self.extend_attribute('etenergies', etenergies)
+            self.extend_attribute('etsecs', etsecs)
+            self.extend_attribute('etsyms', etsyms)
 
         # Parse the various absorption spectra for TDDFT and ROCIS.
         if 'ABSORPTION SPECTRUM' in line or 'ELECTRIC DIPOLE' in line:
@@ -928,7 +1062,8 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
                     return energy, intensity
 
             # Clashes with Orca 2.6 (and presumably before) TDDFT absorption spectrum printing
-            elif line == 'ABSORPTION SPECTRUM' and float(self.metadata['package_version']) > 2.6:
+            elif line == 'ABSORPTION SPECTRUM' and \
+                 parse_version(self.metadata['package_version']).release > (2, 6):
                 def energy_intensity(line):
                     """ CASSCF absorption spectrum
 ------------------------------------------------------------------------------------------
@@ -939,7 +1074,7 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
 ------------------------------------------------------------------------------------------
   0( 0)-> 1( 0) 1   83163.2    120.2   0.088250385   2.25340   0.00000   0.00000   1.50113
 """
-                    reg = r'(\d+)\( ?(\d+)\)-> ?(\d+)\( ?(\d+)\) (\d+)'+ '\s+(\d+\.\d+)'*4 + '\s+(-?\d+\.\d+)'*3
+                    reg = r'(\d+)\( ?(\d+)\)-> ?(\d+)\( ?(\d+)\) (\d+)'+ r'\s+(\d+\.\d+)'*4 + r'\s+(-?\d+\.\d+)'*3
                     res = re.search(reg, line)
                     jstate, jblock, istate, iblock, mult, energy, wavelength, intensity, t2, tx, ty, tz = res.groups()
                     return energy, intensity
@@ -984,8 +1119,8 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
                 if "spin forbidden" in line:
                     etrotat, mx, my, mz = 0.0, 0.0, 0.0, 0.0
                 else:
-                    etrotat, mx, my, mz = [self.float(t) for t in tokens[3:]]
-                etenergies.append(self.float(tokens[1]))
+                    etrotat, mx, my, mz = [utils.float(t) for t in tokens[3:]]
+                etenergies.append(utils.float(tokens[1]))
                 etrotats.append(etrotat)
                 line = next(inputfile)
             self.set_attribute("etrotats", etrotats)
@@ -1001,20 +1136,24 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
             if float(self.metadata["package_version"][:3]) > 4.0:
                 self.skip_lines(inputfile, ['Scaling factor for frequencies', 'b'])
 
-            vibfreqs = numpy.zeros(3 * self.natom)
-            for i, line in zip(range(3 * self.natom), inputfile):
-                vibfreqs[i] = float(line.split()[1])
+            if self.natom > 1:
+                vibfreqs = numpy.zeros(3 * self.natom)
+                for i, line in zip(range(3 * self.natom), inputfile):
+                    vibfreqs[i] = float(line.split()[1])
 
-            nonzero = numpy.nonzero(vibfreqs)[0]
-            self.first_mode = nonzero[0]
-            # Take all modes after first
-            # Mode between imaginary and real modes could be 0
-            self.num_modes = 3*self.natom - self.first_mode
-            if self.num_modes > 3*self.natom - 6:
-                msg = "Modes corresponding to rotations/translations may be non-zero."
-                if self.num_modes == 3*self.natom - 5:
-                    msg += '\n You can ignore this if the molecule is linear.'
-            self.vibfreqs = vibfreqs[self.first_mode:]
+                nonzero = numpy.nonzero(vibfreqs)[0]
+                self.first_mode = nonzero[0]
+                # Take all modes after first
+                # Mode between imaginary and real modes could be 0
+                self.num_modes = 3*self.natom - self.first_mode
+                if self.num_modes > 3*self.natom - 6:
+                    msg = "Modes corresponding to rotations/translations may be non-zero."
+                    if self.num_modes == 3*self.natom - 5:
+                        msg += '\n You can ignore this if the molecule is linear.'
+                self.set_attribute('vibfreqs', vibfreqs[self.first_mode:])
+            else:
+                # we have a single atom
+                self.set_attribute('vibfreqs', numpy.array([]))
 
         # NORMAL MODES
         # ------------
@@ -1029,18 +1168,22 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
         #       2       0.000000   0.000000   0.000000   0.000000   0.000000   0.000000
         # ...
         if line[:12] == "NORMAL MODES":
-            vibdisps = numpy.zeros((3 * self.natom, self.natom, 3), "d")
+            if self.natom > 1:
+                all_vibdisps = numpy.zeros((3 * self.natom, self.natom, 3), "d")
 
-            self.skip_lines(inputfile, ['d', 'b', 'text', 'text', 'text', 'b'])
+                self.skip_lines(inputfile, ['d', 'b', 'text', 'text', 'text', 'b'])
 
-            for mode in range(0, 3 * self.natom, 6):
-                header = next(inputfile)
-                for atom in range(self.natom):
-                    vibdisps[mode:mode + 6, atom, 0] = next(inputfile).split()[1:]
-                    vibdisps[mode:mode + 6, atom, 1] = next(inputfile).split()[1:]
-                    vibdisps[mode:mode + 6, atom, 2] = next(inputfile).split()[1:]
+                for mode in range(0, 3 * self.natom, 6):
+                    header = next(inputfile)
+                    for atom in range(self.natom):
+                        all_vibdisps[mode:mode + 6, atom, 0] = next(inputfile).split()[1:]
+                        all_vibdisps[mode:mode + 6, atom, 1] = next(inputfile).split()[1:]
+                        all_vibdisps[mode:mode + 6, atom, 2] = next(inputfile).split()[1:]
 
-            self.vibdisps = vibdisps[self.first_mode:]
+                self.set_attribute('vibdisps', all_vibdisps[self.first_mode:])
+            else:
+                # we have a single atom
+                self.set_attribute('vibdisps', numpy.array([]))
 
         # -----------
         # IR SPECTRUM
@@ -1054,15 +1197,19 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
         if line[:11] == "IR SPECTRUM":
             self.skip_lines(inputfile, ['d', 'b', 'header', 'd'])
 
-            self.vibirs = numpy.zeros((3 * self.natom,), "d")
+            if self.natom > 1:
+                all_vibirs = numpy.zeros((3 * self.natom,), "d")
 
-            line = next(inputfile)
-            while len(line) > 2:
-                num = int(line[0:4])
-                self.vibirs[num] = float(line.split()[2])
                 line = next(inputfile)
+                while len(line) > 2:
+                    num = int(line[0:4])
+                    all_vibirs[num] = float(line.split()[2])
+                    line = next(inputfile)
 
-            self.vibirs = self.vibirs[self.first_mode:]
+                self.set_attribute('vibirs', all_vibirs[self.first_mode:])
+            else:
+                # we have a single atom
+                self.set_attribute('vibirs', numpy.array([]))
 
         # --------------
         # RAMAN SPECTRUM
@@ -1076,16 +1223,19 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
         if line[:14] == "RAMAN SPECTRUM":
             self.skip_lines(inputfile, ['d', 'b', 'header', 'd'])
 
-            self.vibramans = numpy.zeros(3 * self.natom)
+            if self.natom > 1:
+                all_vibramans = numpy.zeros(3 * self.natom)
 
-            line = next(inputfile)
-            while len(line) > 2:
-                num = int(line[0:4])
-                self.vibramans[num] = float(line.split()[2])
                 line = next(inputfile)
+                while len(line) > 2:
+                    num = int(line[0:4])
+                    all_vibramans[num] = float(line.split()[2])
+                    line = next(inputfile)
 
-            self.vibramans = self.vibramans[self.first_mode:]
-
+                self.set_attribute('vibramans', all_vibramans[self.first_mode:])
+            else:
+                # we have a single atom
+                self.set_attribute('vibramans', numpy.array([]))
 
         # ORCA will print atomic charges along with the spin populations,
         #   so care must be taken about choosing the proper column.
@@ -1147,13 +1297,13 @@ States  Energy Wavelength    D2        m2        Q2         D2+m2+Q2       D2/TO
             dipole = utils.convertor(dipole, "ebohr", "Debye")
 
             if not hasattr(self, 'moments'):
-                self.moments = [reference, dipole]
+                self.set_attribute('moments', [reference, dipole])
             else:
                 try:
                     assert numpy.all(self.moments[1] == dipole)
                 except AssertionError:
                     self.logger.warning('Overwriting previous multipole moments with new values')
-                    self.moments = [reference, dipole]
+                    self.set_attribute('moments', [reference, dipole])
 
         if "Molecular Dynamics Iteration" in line:
             self.skip_lines(inputfile, ['d', 'ORCA MD', 'd', 'New Coordinates'])

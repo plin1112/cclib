@@ -8,7 +8,7 @@ Requirements
 
 Before you install cclib, you need to make sure that you have the following:
  * Python (at least version 3.4 is recommended, although 2.7 is still tested)
- * NumPy (at least version 1.5 is recommended)
+ * NumPy (at least version 1.15 is recommended)
 
 Python is an open-source programming language available from https://www.python.org. It is available for Windows as well as being included in most Linux distributions. In Debian/Ubuntu it is installed as follows (as root):
 
@@ -88,8 +88,8 @@ Manual download and install
 ---------------------------
 
 The source code of the newest release of cclib (version |release|) is distributed as:
- * A .zip file: https://github.com/cclib/cclib/releases/download/v1.6/cclib-1.6.1.zip
- * A .tar.gz file: https://github.com/cclib/cclib/releases/download/v1.6/cclib-1.6.1.tar.gz
+ * A .zip file: https://github.com/cclib/cclib/releases/download/v1.6/cclib-1.6.2.zip
+ * A .tar.gz file: https://github.com/cclib/cclib/releases/download/v1.6/cclib-1.6.2.tar.gz
  * Windows binary installers (see the `newest release page`_)
 
 On Windows, if you choose to download the .exe files instead, you can install simply by double-clicking on the file. To uninstall, use the "Add and Remove Programs" menu in the Control Panel.
@@ -115,7 +115,7 @@ To test, trying importing '''cclib''' at the Python prompt. You should see somet
     Type "help", "copyright", "credits" or "license" for more information.
     >>> import cclib
     >>> cclib.__version__
-    '1.6.1'
+    '1.6.2'
     >>>
 
 .. _`newest release page`: https://github.com/cclib/cclib/releases/tag/v1.3.1

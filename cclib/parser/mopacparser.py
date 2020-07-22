@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -68,7 +68,7 @@ class MOPAC(logfileparser.Logfile):
         self.geomdone = False
 
         # Compile the dashes-and-or-spaces-only regex.
-        self.re_dashes_and_spaces = re.compile('^[\s-]+$')
+        self.re_dashes_and_spaces = re.compile(r'^[\s-]+$')
 
         self.star = ' * '
         self.stars = ' *******************************************************************************'
@@ -86,24 +86,15 @@ class MOPAC(logfileparser.Logfile):
     def extract(self, inputfile, line):
         """Extract information from the file object inputfile."""
 
-        if "(Version:" in line:
-            # Part of the full version can be extracted from here, but is
-            # missing information about the bitness.
-            package_version = line[line.find("MOPAC") + 5:line.find("(")]
-            package_version = package_version[:4]
-            if "BETA" in line:
-                package_version = package_version + " BETA"
-            self.metadata["package_version"] = package_version
-
-        # Don't use the full package version until we know its field
-        # yet.
+        # Extract the package version.
         if "For non-commercial use only" in line:
-            tokens = line.split()
-            tokens = tokens[8:]
-            assert len(tokens) == 2
-            package_version_full = tokens[0]
-            if tokens[1] != "**":
-                package_version_full = '-'.join(tokens)[:-2]
+            # Ignore the platorm information for now (the last character).
+            self.metadata["package_version"] = line.split()[8][:-1]
+            # Use the year as the legacy (short) package version.
+            self.skip_lines(
+                inputfile, ["Stewart Computational Chemistry", "s", "s", "s", "s"]
+            )
+            self.metadata["legacy_package_version"] = next(inputfile).split()[1][5:]
 
         # Extract the atomic numbers and coordinates from the optimized geometry
         # note that cartesian coordinates section occurs multiple times in the file, and we want to end up using the last instance
@@ -166,13 +157,13 @@ class MOPAC(logfileparser.Logfile):
         if 'FINAL HEAT OF FORMATION =' in line:
             if not hasattr(self, "scfenergies"):
                 self.scfenergies = []
-            self.scfenergies.append(utils.convertor(self.float(line.split()[5]), "kcal/mol", "eV"))
+            self.scfenergies.append(utils.convertor(utils.float(line.split()[5]), "kcal/mol", "eV"))
 
         # Molecular mass parsing (units will be amu)
         #
         # MOLECULAR WEIGHT        ==        130.1890
         if line[0:35] == '          MOLECULAR WEIGHT        =':
-            self.molmass = self.float(line.split()[3])
+            self.molmass = utils.float(line.split()[3])
 
         #rotational constants
         #Example:

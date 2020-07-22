@@ -1,3 +1,41 @@
+Changes in cclib-1.6.3
+
+Features:
+    * New bridge to Psi4 (Felipe S. S. Schneider)
+    * New attribute zpve for zero-point vibrational energy correction (kuriba)
+    * New attributes for electric transition dipoles of electronic transitions (mwykes)
+    * Support ccenergies in ORCA
+    * Support mpenergies in ORCA (Alex Maldonado)
+    * Support grads in MOLCAS (Daniele Padula)
+    * Support Mulliken atomspins in Gaussian (Peter St. John)
+    * Support temperature, pressure, enthalpy, entropy and freenergy attributes in GAMESS (Mark Perri)
+    * Support fuzzy matching of attribute in ccget script
+    * Updated test file versions to Psi4 1.3.1, and ORCA 4.2
+
+Bugfixes:
+    * Fixed parsing of vibrational attribute for single atoms in ORCA (Felipe S. S. Schneider)
+    * Fixed parsing very long ORCA logfiles (Alex Maldonado)
+    * Fixed method code for principal moments of inertia, and mulliken charges in Gaussian (James E T Smith)
+    * Fixed scannames, scanparm and scanenergies in Gaussian (Dustin Wheeler)
+    * Fixed freeenergy in ORCA 4.2 (shijunang)
+    * Fixed name collisions in tests and use of periodic table in utilities (Waylon Peng)
+
+Changes in cclib-1.6.2
+
+Features:
+    * Molden writer now supports ghost atoms (Shiv Upadhyay)
+    * Handle comments in XYZ files when reading and writing
+    * Updated regression testing framework (Amanda Dumi, Shiv Upadhyay)
+    * Updated test file versions to GAMESS-US 2018 (Shiv Upadhyay)
+
+Bugfixes:
+    * Fixed parsing ORCA output with user comments in coordinates (Felix Plasser)
+    * Fixed parsing ORCA output with embedding potentials
+    * Fixed parsing ORCA output with ROCIS in version 4.1
+    * Fixed parsing etenergies and similar attribute in ORCA for excited states
+    * Fixed parsing of vibfreqs for ORCA for linear molecules
+    * Parsing geometry optimization in ORCA is mode robust wrt line endings
+
 Changes in cclib-1.6.1
 
 Features:

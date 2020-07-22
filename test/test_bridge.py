@@ -12,12 +12,19 @@ import unittest
 
 sys.path.insert(1, "bridge")
 
-if sys.version_info[0] == 3 and sys.version_info[1] >= 4:
-    from .bridge.testbiopython import *
-from .bridge.testopenbabel import *
-if sys.version_info[0] == 2:
-    from .bridge.testpyquante import *
+if sys.version_info[0] == 3:
+    if sys.version_info[1] >= 6:
+        from .bridge.testpsi4 import *
+        from .bridge.testhorton import Horton3Test
+    if sys.version_info[1] >= 4:
+        from .bridge.testbiopython import *
+    from .bridge.testpyquante import pyquante2Test
 
+from .bridge.testopenbabel import *
+
+if sys.version_info[0] == 2:
+    from .bridge.testhorton import Horton2Test
+    from .bridge.testpyquante import PyquanteTest
 
 if __name__ == "__main__":
     unittest.main()

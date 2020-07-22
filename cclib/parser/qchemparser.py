@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2018, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -11,6 +11,7 @@ from __future__ import division
 from __future__ import print_function
 
 import itertools
+import math
 import re
 
 import numpy
@@ -61,11 +62,11 @@ class QChem(logfileparser.Logfile):
         )
 
         # Compile the dashes-and-or-spaces-only regex.
-        self.re_dashes_and_spaces = re.compile('^[\s-]+$')
+        self.re_dashes_and_spaces = re.compile(r'^[\s-]+$')
 
         # Compile the regex for extracting the atomic index from an
         # aoname.
-        self.re_atomindex = re.compile('(\d+)_')
+        self.re_atomindex = re.compile(r'(\d+)_')
 
         # A maximum of 6 columns per block when printing matrices. The
         # Fock matrix is 4.
@@ -255,10 +256,10 @@ cannot be determined. Rerun without `$molecule read`."""
 
         while list(set(line.strip())) != ['-']:
             elements = line.split()
-            charge = self.float(elements[2])
+            charge = utils.float(elements[2])
             charges.append(charge)
             if has_spins:
-                spin = self.float(elements[3])
+                spin = utils.float(elements[3])
                 spins.append(spin)
             line = next(inputfile)
 
@@ -368,7 +369,7 @@ cannot be determined. Rerun without `$molecule read`."""
             else:
                 for e in tokens:
                     try:
-                        energy = utils.convertor(self.float(e), 'hartree', 'eV')
+                        energy = utils.convertor(utils.float(e), 'hartree', 'eV')
                     except ValueError:
                         energy = numpy.nan
                     energies.append(energy)
@@ -421,13 +422,37 @@ cannot be determined. Rerun without `$molecule read`."""
 
         # Extract the version number and optionally the version
         # control info.
-        if "Q-Chem" in line:
-            match = re.search(r"Q-Chem\s([0-9\.]*)\sfor", line)
+        if any(version_trigger in line for version_trigger in ("Q-Chem", "Unrecognized platform", "Version")):
+            # Part 1 matches
+            #   - `Q-Chem 4.3.0 for Intel X86 EM64T Linux`
+            # Part 2 matches
+            #   - `Unrecognized platform!!! 4.0.0.1`
+            # Part 3 matches
+            #   - `Intel X86 EM64T Linux Version 4.1.0.1 `
+            #   but not
+            #   - `Additional authors for Version 3.1:`
+            #   - `Q-Chem, Version 4.1, Q-Chem, Inc., Pittsburgh, PA (2013).`
+            match = re.search(
+                r"Q-Chem\s([\d\.]*)\sfor|"
+                r"Unrecognized platform!!!\s([\d\.]*)\b|"
+                r"Version\s([\d\.]*)\s*$",
+                line
+            )
             if match:
-                self.metadata["package_version"] = match.groups()[0]
-        # Don't add revision information to the main package version for now.
-        if "SVN revision" in line:
-            revision = line.split()[3]
+                groups = [s for s in match.groups() if s is not None]
+                assert len(groups) == 1
+                package_version = groups[0]
+                self.metadata["package_version"] = package_version
+                self.metadata["legacy_package_version"] = package_version
+        # Avoid "Last SVN revision" entry.
+        if "SVN revision" in line and "Last" not in line:
+            svn_revision = line.split()[3]
+            line = next(inputfile)
+            svn_branch = line.split()[3].replace("/", "_")
+            if "package_version" in self.metadata:
+                self.metadata["package_version"] = "{}dev+{}-{}".format(
+                    self.metadata["package_version"], svn_branch, svn_revision
+                )
 
         # Disable/enable parsing for fragment sections.
         if any(message in line for message in self.fragment_section_headers):
@@ -667,9 +692,13 @@ cannot be determined. Rerun without `$molecule read`."""
                 self.append_attribute('time', float(tokens[8]))
 
             # Extract the atomic numbers and coordinates of the atoms.
-            if 'Standard Nuclear Orientation (Angstroms)' in line:
-                if not hasattr(self, 'atomcoords'):
-                    self.atomcoords = []
+            if 'Standard Nuclear Orientation' in line:
+                if "Angstroms" in line:
+                    convertor = lambda x: x
+                elif 'Bohr' in line:
+                    convertor = lambda x: utils.convertor(x, 'bohr', 'Angstrom')
+                else:
+                    raise ValueError("Unknown units in coordinate header: {}".format(line))
                 self.skip_lines(inputfile, ['cols', 'dashes'])
                 atomelements = []
                 atomcoords = []
@@ -677,10 +706,10 @@ cannot be determined. Rerun without `$molecule read`."""
                 while list(set(line.strip())) != ['-']:
                     entry = line.split()
                     atomelements.append(entry[1])
-                    atomcoords.append(list(map(float, entry[2:])))
+                    atomcoords.append([convertor(float(value)) for value in entry[2:]])
                     line = next(inputfile)
 
-                self.atomcoords.append(atomcoords)
+                self.append_attribute('atomcoords', atomcoords)
 
                 # We calculate and handle atomnos no matter what, since in
                 # the case of fragment calculations the atoms may change,
@@ -701,7 +730,7 @@ cannot be determined. Rerun without `$molecule read`."""
             # Useful for determining the number of occupied/virtual orbitals.
             if 'Nuclear Repulsion Energy' in line:
                 line = next(inputfile)
-                nelec_re_string = 'There are(\s+[0-9]+) alpha and(\s+[0-9]+) beta electrons'
+                nelec_re_string = r'There are(\s+[0-9]+) alpha and(\s+[0-9]+) beta electrons'
                 match = re.findall(nelec_re_string, line.strip())
                 self.set_attribute('nalpha', int(match[0][0].strip()))
                 self.set_attribute('nbeta', int(match[0][1].strip()))
@@ -843,12 +872,12 @@ cannot be determined. Rerun without `$molecule read`."""
                 line_e = next(inputfile).split()[2:4]
 
                 if not hasattr(self, 'geotargets'):
-                    self.geotargets = [line_g[1], line_d[1], self.float(line_e[1])]
+                    self.geotargets = [line_g[1], line_d[1], utils.float(line_e[1])]
                 if not hasattr(self, 'geovalues'):
                     self.geovalues = []
-                maxg = self.float(line_g[0])
-                maxd = self.float(line_d[0])
-                ediff = self.float(line_e[0])
+                maxg = utils.float(line_g[0])
+                maxd = utils.float(line_d[0])
+                ediff = utils.float(line_e[0])
                 geovalues = [maxg, maxd, ediff]
                 self.geovalues.append(geovalues)
 
@@ -951,6 +980,11 @@ cannot be determined. Rerun without `$molecule read`."""
                 if not has_triples:
                     ccsdenergy = utils.convertor(ccsdenergy, 'hartree', 'eV')
                     self.ccenergies.append(ccsdenergy)
+
+            if line[:11] == " CCSD  T1^2":
+                t1_squared = float(line.split()[3])
+                t1_norm = math.sqrt(t1_squared)
+                self.metadata["t1_diagnostic"] = t1_norm / math.sqrt(2 * (self.nalpha + self.nbeta))
 
             # Electronic transitions. Works for both CIS and TDDFT.
             if 'Excitation Energies' in line:

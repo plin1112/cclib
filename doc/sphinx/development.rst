@@ -91,7 +91,7 @@ The input files for tests, which are logfiles from computational chemistry progr
 
 .. _`Travis CI`: https://travis-ci.org/cclib/cclib
 
-.. |travis_prod| image:: https://travis-ci.org/cclib/cclib.svg?branch=v1.6.1
+.. |travis_prod| image:: https://travis-ci.org/cclib/cclib.svg?branch=v1.6.2
 .. |travis_master| image:: https://travis-ci.org/cclib/cclib.svg?branch=master
 
 .. _`data directory`: https://github.com/cclib/cclib/tree/master/data
@@ -109,9 +109,9 @@ The job types currently included as unit tests:
 
 * restricted and unrestricted single point energies for dvb (RHF/STO-3G **and** B3LYP/STO-3G)
 * geometry optimization and scan for dvb (RHF/STO-3G and/or B3LYP/STO-3G)
-* frequency calculation with IR and Raman intensities for dvb (RHF/STO-3G or B3LYP/STO-3G)
+* frequency calculation with IR intensities and Raman activities for dvb (RHF/STO-3G or B3LYP/STO-3G)
 * single point energy for carbon atom using a large basis set such as aug-cc-pCVQZ
-* Møller–Plesset and coupled cluster energies for water (STO-3G or 6-31G basis set)
+* Møller–Plesset and coupled cluster energies for water (STO-3G basis set)
 * static polarizabilities for tryptophan (RHF/STO-3G)
 
 .. _`table of attribute coverage`: data_dev.html#details-of-current-implementation

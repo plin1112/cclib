@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2019, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -17,6 +17,8 @@ import os
 import random
 import sys
 import zipfile
+from abc import ABCMeta, abstractmethod
+from six import add_metaclass
 
 if sys.version_info.major == 2:
     getargspec = inspect.getargspec
@@ -95,10 +97,13 @@ class FileWrapper(object):
 
         # Assume the position is what was passed to the constructor.
         self.pos = pos
+        
+        self.last_line = None
 
     def next(self):
         line = next(self.src)
         self.pos += len(line)
+        self.last_line = line
         return line
 
     def __next__(self):
@@ -182,6 +187,7 @@ def openlogfile(filename, object=None):
         return fileobject
 
 
+@add_metaclass(ABCMeta)
 class Logfile(object):
     """Abstract class for logfile objects.
 
@@ -330,6 +336,10 @@ class Logfile(object):
             except StopIteration:
                 self.logger.error("Unexpectedly encountered end of logfile.")
                 break
+            except Exception as e:
+                self.logger.error("Encountered error when parsing.")
+                self.logger.error("Last line read: %s" % inputfile.last_line)
+                raise
 
         # Close input file object.
         if not self.isstream:
@@ -398,28 +408,9 @@ class Logfile(object):
                 self.progress.update(newstep, msg)
                 self.progress.step = newstep
 
+    @abstractmethod
     def normalisesym(self, symlabel):
-        """Standardise the symmetry labels between parsers.
-
-        This method should be overwritten by individual parsers, and should
-        contain appropriate doctests. If is not overwritten, this is detected
-        as an error by unit tests.
-        """
-        raise NotImplementedError("normalisesym(self, symlabel) must be overriden by the parser.")
-
-    def float(self, number):
-        """Convert a string to a float.
-
-        This method should perform certain checks that are specific to cclib,
-        including avoiding the problem with Ds instead of Es in scientific notation.
-        Another point is converting string signifying numerical problems (*****)
-        to something we can manage (Numpy's NaN).
-        """
-
-        if list(set(number)) == ['*']:
-            return numpy.nan
-
-        return float(number.replace("D", "E"))
+        """Standardise the symmetry labels between parsers."""
 
     def new_internal_job(self):
         """Delete attributes that can be problematic in multistep jobs.
@@ -467,6 +458,13 @@ class Logfile(object):
         if not hasattr(self, name):
             self.set_attribute(name, [])
         getattr(self, name).append(value)
+
+    def extend_attribute(self, name, values):
+        """Appends an iterable of values to an attribute."""
+        
+        if not hasattr(self, name):
+            self.set_attribute(name, [])
+        getattr(self, name).extend(values)
 
     def _assign_coreelectrons_to_element(self, element, ncore,
                                          ncore_is_total_count=False):

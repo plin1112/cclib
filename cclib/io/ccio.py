@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2019, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -78,7 +78,7 @@ URL_PATTERN = re.compile(
 
 )
 
-# Parser choice is triggered by certain phrases occuring the logfile. Where these
+# Parser choice is triggered by certain phrases occurring the logfile. Where these
 # strings are unique, we can set the parser and break. In other cases, the situation
 # is a little but more complicated. Here are the exceptions:
 #   1. The GAMESS trigger also works for GAMESS-UK files, so we can't break
@@ -244,7 +244,7 @@ def ccopen(source, *args, **kwargs):
                 is_stream = True
 
                 # Retrieve filename from URL if possible
-                filename = re.findall("\w+\.\w+", source.split('/')[-1])
+                filename = re.findall(r"\w+\.\w+", source.split('/')[-1])
                 filename = filename[0] if filename else ""
 
                 inputfile = logfileparser.openlogfile(filename, object=response.read())
@@ -295,7 +295,7 @@ def ccopen(source, *args, **kwargs):
     # could be guessed. Need to make sure the input file is closed before creating
     # an instance, because parsers will handle opening/closing on their own.
     if filetype:
-        # We're going to clase and reopen below anyway, so this is just to avoid
+        # We're going to close and reopen below anyway, so this is just to avoid
         # the missing seek method for fileinput.FileInput. In the long run
         # we need to refactor to support for various input types in a more
         # centralized fashion.
@@ -322,7 +322,11 @@ def fallback(source):
     if isinstance(source, str):
         ext = os.path.splitext(source)[1][1:].lower()
         if _has_cclib2openbabel:
-            import pybel as pb
+            # From OB 3.0 onward, Pybel is contained inside the OB module.
+            try:
+                import openbabel.pybel as pb
+            except:
+                import pybel as pb
             if ext in pb.informats:
                 return cclib2openbabel.readfile(source, ext)
         else:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2018, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -34,21 +34,48 @@ class Molcas(logfileparser.Logfile):
         """Return a representation of the object."""
         return 'Molcas("%s")' % (self.filename)
 
-    #These are yet to be implemented.
     def normalisesym(self, label):
-        """Does Molcas require symmetry label normalization?"""
+        """Normalise the symmetries used by Molcas.
+
+        The labels are standardized except for the first character being lowercase.
+        """
+        return label[0].upper() + label[1:]
 
     def after_parsing(self):
         for element, ncore in self.core_array:
             self._assign_coreelectrons_to_element(element, ncore)
 
+        if "package_version" in self.metadata:
+            # Use the short version as the legacy version.
+            self.metadata["legacy_package_version"] = self.metadata["package_version"]
+            # If there is both a tag and the full hash, place the tag
+            # first. Both are chosen to be local, since there isn't a
+            # distinction between development and release builds in their
+            # version cycle.
+            if "tag" in self.metadata and "revision" in self.metadata:
+                self.metadata["package_version"] = "{}+{}.{}".format(
+                    self.metadata["package_version"],
+                    self.metadata["tag"],
+                    self.metadata["revision"]
+                )
+            elif "tag" in self.metadata:
+                self.metadata["package_version"] = "{}+{}".format(
+                    self.metadata["package_version"],
+                    self.metadata["tag"]
+                )
+            elif "revision" in self.metadata:
+                self.metadata["package_version"] = "{}+{}".format(
+                    self.metadata["package_version"],
+                    self.metadata["revision"]
+                )
+
     def before_parsing(self):
         # Compile the regex for extracting the element symbol from the
         # atom label in the "Molecular structure info" block.
-        self.re_atomelement = re.compile('([a-zA-Z]+)\d?')
+        self.re_atomelement = re.compile(r'([a-zA-Z]+)\d?')
 
         # Compile the dashes-and-or-spaces-only regex.
-        self.re_dashes_and_spaces = re.compile('^[\s-]+$')
+        self.re_dashes_and_spaces = re.compile(r'^[\s-]+$')
 
         # Molcas can do multiple calculations in one job, and each one
         # starts from the gateway module. Onle parse the first.
@@ -67,17 +94,15 @@ class Molcas(logfileparser.Logfile):
 
         # Extract the version number and optionally the Git tag and hash.
         if "version" in line:
-            match = re.search(r"\s{2,}version\s(\d*\.\d*)", line)
+            match = re.search(r"\s{2,}version:?\s(\d*\.\d*)", line)
             if match:
-                package_version = match.groups()[0]
-                self.metadata["package_version"] = package_version
-        # Don't add revision information to the main package version for now.
+                self.metadata["package_version"] = match.groups()[0]
         if "tag" in line:
-            tag = line.split()[-1]
+            self.metadata["tag"] = line.split()[-1]
         if "build" in line:
             match = re.search(r"\*\s*build\s(\S*)\s*\*", line)
             if match:
-                revision = match.groups()[0]
+                self.metadata["revision"] = match.groups()[0]
 
         ## This section is present when executing &GATEWAY.
         # ++    Molecular structure info:
@@ -289,17 +314,17 @@ class Molcas(logfileparser.Logfile):
             while line.split() != ['Energy', 'Energy', 'Energy', 'Change', 'Delta', 'Norm', 'in', 'Sec.']:
                 line = next(inputfile)
 
-            iteration_regex = ("^([0-9]+)"                                  # Iter
-                               "( [ \-0-9]*\.[0-9]{6,9})"                   # Tot. SCF Energy
-                               "( [ \-0-9]*\.[0-9]{6,9})"                   # One-electron Energy
-                               "( [ \-0-9]*\.[0-9]{6,9})"                   # Two-electron Energy
-                               "( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Energy Change
-                               "( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Max Dij or Delta Norm
-                               "( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Max Fij
-                               "( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # DNorm
-                               "( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # TNorm
-                               "( [ A-Za-z0-9]*)"                           # AccCon
-                               "( [ \.0-9]*)$")                             # Time in Sec.
+            iteration_regex = (r"^([0-9]+)"                                  # Iter
+                               r"( [ \-0-9]*\.[0-9]{6,9})"                   # Tot. SCF Energy
+                               r"( [ \-0-9]*\.[0-9]{6,9})"                   # One-electron Energy
+                               r"( [ \-0-9]*\.[0-9]{6,9})"                   # Two-electron Energy
+                               r"( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Energy Change
+                               r"( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Max Dij or Delta Norm
+                               r"( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # Max Fij
+                               r"( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # DNorm
+                               r"( [ \-0-9]*\.[0-9]{2}E[\-\+][0-9]{2}\*?)"   # TNorm
+                               r"( [ A-Za-z0-9]*)"                           # AccCon
+                               r"( [ \.0-9]*)$")                             # Time in Sec.
 
             scfvalues = []
             line = next(inputfile)
@@ -661,6 +686,65 @@ class Molcas(logfileparser.Logfile):
                         'symmetry. Ignoring these coordinates.'
                         % (len(atomcoords), self.natom))
 
+        ## Parsing Molecular Gradients attributes in this section.
+        # ()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()
+        # 
+        #                                               &ALASKA
+        # 
+        #                                    only a single process is used
+        #                        available to each process: 2.0 GB of memory, 1 thread
+        # ()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()()
+        # ...
+        # ...
+        #  **************************************************
+        #  *                                                *
+        #  *              Molecular gradients               *
+        #  *                                                *
+        #  **************************************************
+        # 
+        #   Irreducible representation: a  
+        #  ---------------------------------------------------------
+        #                      X             Y             Z        
+        #  ---------------------------------------------------------
+        #   C1               -0.00009983   -0.00003043    0.00001004
+        #   ...
+        #   H20              -0.00027629    0.00010546    0.00003317
+        #  ---------------------------------------------------
+        # WARNING: "Molecular gradients, after ESPF" is found for ESPF QM/MM calculations
+        if "Molecular gradients " in line:
+
+            if not hasattr(self, "grads"):
+                self.grads = []
+
+            self.skip_lines(inputfile, ['stars', 'stars', 'blank', 'header',
+                                        'dashes', 'header', 'dashes'])
+
+            grads = []
+            line = next(inputfile)
+            while len(line.split()) == 4:
+                tmpgrads = list(map(float, line.split()[1:]))
+                grads.append(tmpgrads)
+                line = next(inputfile)
+
+            self.append_attribute('grads', grads)
+
+        # This code here works, but QM/MM gradients are printed after QM ones.
+        # Maybe another attribute is needed to store them to have both.
+        if "Molecular gradients, after ESPF" in line:
+
+            self.skip_lines(inputfile, ['stars', 'stars', 'blank', 'header',
+                                        'dashes', 'header', 'dashes'])
+
+            grads = []
+            line = next(inputfile)
+            while len(line.split()) == 4:
+                tmpgrads = list(map(float, line.split()[1:]))
+                grads.append(tmpgrads)
+                line = next(inputfile)
+
+            self.grads[-1] = grads
+
+        ###
         #        All orbitals with orbital energies smaller than  E(LUMO)+0.5 are printed
         #
         #  ++    Molecular orbitals:
@@ -765,7 +849,7 @@ class Molcas(logfileparser.Logfile):
         #         Shanks-type energy S1(E)             =      -75.0009150108 a.u.
         if 'Total MBPT2 energy' in line:
             mpenergies = []
-            mpenergies.append(utils.convertor(self.float(line.split()[4]), 'hartree', 'eV'))
+            mpenergies.append(utils.convertor(utils.float(line.split()[4]), 'hartree', 'eV'))
             if not hasattr(self, 'mpenergies'):
                 self.mpenergies = []
             self.mpenergies.append(mpenergies)
@@ -793,7 +877,7 @@ class Molcas(logfileparser.Logfile):
                 while not line.strip().startswith('Total energy (diff)'):
                     line = next(inputfile)
 
-                ccenergies = utils.convertor(self.float(line.split()[4]), 'hartree', 'eV')
+                ccenergies = utils.convertor(utils.float(line.split()[4]), 'hartree', 'eV')
                 if not hasattr(self, 'ccenergies'):
                     self.ccenergies= []
                 self.ccenergies.append(ccenergies)
@@ -828,7 +912,7 @@ class Molcas(logfileparser.Logfile):
             gbasis_array = []
             while '--' not in line and '****' not in line:
                 if 'Basis set:' in line:
-                    basis_element_patterns = re.findall('Basis set:([A-Za-z]{1,2})\.', line)
+                    basis_element_patterns = re.findall(r'Basis set:([A-Za-z]{1,2})\.', line)
                     assert len(basis_element_patterns) == 1
                     basis_element = basis_element_patterns[0].title()
                     gbasis_array.append((basis_element, []))
@@ -844,8 +928,8 @@ class Molcas(logfileparser.Logfile):
                     coefficients = []
                     func_array = []
                     while line.split():
-                        exponents.append(self.float(line.split()[1]))
-                        coefficients.append([self.float(i) for i in line.split()[2:]])
+                        exponents.append(utils.float(line.split()[1]))
+                        coefficients.append([utils.float(i) for i in line.split()[2:]])
                         line = next(inputfile)
 
                     for i in range(len(coefficients[0])):

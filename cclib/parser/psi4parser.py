@@ -50,8 +50,13 @@ class Psi4(logfileparser.Logfile):
                 self.set_attribute('natom', len(self.atomnos))
 
     def normalisesym(self, label):
-        """Psi4 does not require normalizing symmetry labels."""
-        return label
+        """Use standard symmetry labels instead of Psi4 labels.
+
+        To normalise:
+        (1) `App` -> `A"`
+        (2) `Ap` -> `A'`
+        """
+        return label.replace("pp", '"').replace("p", "'")
 
     # Match the number of skipped lines required based on the type of
     # gradient present (determined from the header), as otherwise the
@@ -73,17 +78,33 @@ class Psi4(logfileparser.Logfile):
 
         # Extract the version number and the version control
         # information, if it exists.
-        if "Driver" in line:
-            tokens = line.split()
+        if "An Open-Source Ab Initio Electronic Structure Package" in line:
+            version_line = next(inputfile)
+            tokens = version_line.split()
             package_version = tokens[1].split("-")[-1]
-            self.metadata["package_version"] = package_version
+            self.metadata["legacy_package_version"] = package_version
             # Keep track of early versions of Psi4.
             if "beta" in package_version:
                 self.version_4_beta = True
-        # Don't add revision information to the main package version for now.
-        if "Git:" in line:
-            tokens = line.split()
-            revision = '-'.join(tokens[2:])
+                # `beta2+` -> `0!0.beta2`
+                package_version = "0!0.{}".format(package_version)
+                if package_version[-1] == "+":
+                    # There is no good way to keep the bare plus sign around,
+                    # but this version is so old...
+                    package_version = package_version[:-1]
+            else:
+                package_version = "1!{}".format(package_version)
+            self.skip_line(inputfile, "blank")
+            line = next(inputfile)
+            if "Git:" in line:
+                tokens = line.split()
+                assert tokens[1] == "Rev"
+                revision = '-'.join(tokens[2:]).replace("{", "").replace("}", "")
+                dev_flag = "" if "dev" in package_version else ".dev"
+                package_version = "{}{}+{}".format(
+                    package_version, dev_flag, revision
+                )
+            self.metadata["package_version"] = package_version
 
         # This will automatically change the section attribute for Psi4, when encountering
         # a line that <== looks like this ==>, to whatever is in between.
@@ -95,8 +116,8 @@ class Psi4(logfileparser.Logfile):
         # Determine whether or not the reference wavefunction is
         # restricted, unrestricted, or restricted open-shell.
         if line.strip() == "SCF":
-            self.skip_line(inputfile, 'author list')
-            line = next(inputfile)
+            while "Reference" not in line:
+                line = next(inputfile)
             self.reference = line.split()[0]
             # Work with a complex reference as if it's real.
             if self.reference[0] == 'C':
@@ -1018,6 +1039,20 @@ class Psi4(logfileparser.Logfile):
 
         if line.strip().startswith('Using finite-differences of gradients'):
             self.set_attribute('finite_difference', True)
+
+        # This is the result of calling `print_variables()` and contains all
+        # current inner variables known to Psi4.
+        if line.strip() == "Variable Map:":
+            self.skip_line(inputfile, "d")
+            line = next(inputfile)
+            while line.strip():
+                tokens = line.split()
+                # Remove double quotation marks
+                name = " ".join(tokens[:-2])[1:-1]
+                value = float(tokens[-1])
+                if name == "CC T1 DIAGNOSTIC":
+                    self.metadata["t1_diagnostic"] = value
+                line = next(inputfile)
 
         if line[:54] == '*** Psi4 exiting successfully. Buy a developer a beer!'\
                 or line[:54] == '*** PSI4 exiting successfully. Buy a developer a beer!':

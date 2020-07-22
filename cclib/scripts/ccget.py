@@ -15,6 +15,7 @@ import glob
 import logging
 import os.path
 import sys
+import difflib
 from functools import partial
 from pprint import pprint
 
@@ -90,7 +91,7 @@ def ccget():
 
     # Toggle full print behaviour for numpy arrays.
     if full:
-        numpy.set_printoptions(threshold=numpy.nan)
+        numpy.set_printoptions(threshold=numpy.inf)
 
     # We need at least one attribute and the filename, so two arguments, or
     # just one filename if we want to list attributes that can be extracted.
@@ -111,6 +112,13 @@ def ccget():
     attrnames = []
     filenames = []
     for arg in arglist:
+        if arg not in ccData._attrlist:
+            fuzzy_attr = difflib.get_close_matches(arg, ccData._attrlist, n=1, cutoff=0.85)
+            if len(fuzzy_attr) > 0:
+                fuzzy_attr = fuzzy_attr[0]
+                logging.warning("Attribute '{0}' not found, but attribute '{1}' is close. "
+                    "Using '{1}' instead.".format(arg, fuzzy_attr))
+                arg = fuzzy_attr
         if arg in ccData._attrlist:
             attrnames.append(arg)
         elif URL_PATTERN.match(arg) or os.path.isfile(arg):

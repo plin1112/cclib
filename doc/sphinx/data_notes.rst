@@ -4,9 +4,9 @@
 Parsed data notes
 =================
 
-This is a list of descriptions and notes for all the data attributes currently parsed by cclib, either in the official release (|release|) or development branch. In particular, this page contains technical details about the interpretation of attributes, how to produce them in the various programs and examples in some cases. For a summary and details of the current implementation by the different parsers, please see the `extracted data`_ page and its `development`_ version.
+This is a list of descriptions and notes for all the data attributes currently parsed by cclib, either in the official release (|release|) or development branch. In particular, this page contains technical details about the interpretation of attributes, how to produce them in the various programs and examples in some cases. For a summary and details of the current implementation by the different parsers, please see the `parsed data`_ page and its `development`_ version.
 
-.. _`extracted data`: data.html
+.. _`parsed data`: data.html
 .. _`development`: data_dev.html
 
 aonames
@@ -291,7 +291,14 @@ An array of rank 1 that contains the elements of the `hessian <http://en.wikiped
 homos
 -----
 
-A 1D array that holds the indexes of the highest occupied molecular orbitals (HOMOs), which contains one element for restricted and two elements for unrestricted calculations. These indexes can be applied to other attributes describing molecular orbitals, such as `moenergies`_ and `mocoeffs`_.
+A 1D array that holds the indexes of the highest occupied molecular orbitals (HOMOs), with one element for restricted and two elements for unrestricted calculations. These indexes can be applied to other attributes describing molecular orbitals, such as `moenergies`_ and `mocoeffs`_. For example:
+
+.. code-block:: python
+
+  >> data = cclib.io.ccread('water_mp2')
+  >> last_occupied_energy = data.moenergies[0][data.homos[0]]
+
+>> **Note:** All indexes in cclib start from zero, as per Python conventions. This applies to the contents of ``homos`` as well, which means ``homos[0]`` refers to the *index* of the HOMO when referencing other attributes and not the number of occupied orbitals.
 
 .. index::
     single: molecular orbitals; mocoeffs (attribute)
@@ -392,15 +399,15 @@ The symmetry labels are normalised and cclib reports standard symmetry names:
     sigma.g Sigma.g                     SGG
     ======= ======= ======= ==========  ==================          ======
 
-* ADF - the full list can be found [http://www.scm.com/Doc/Doc2005.01/ADF/ADFUsersGuide/page339.html here].
-* GAMESS-UK - to get the list, 'grep "data yr" input.m' if you have access to the source. Note that for E, it's split into "e1+" and "e1-" for instance.
-* Jaguar - to get the list, look at the examples in schrodinger/jaguar-whatever/samples if you have access to Jaguar. Note that for E, it's written as E1pp/Ap, for instance.
+* ADF - the full list can be found `here http://www.scm.com/Doc/Doc2005.01/ADF/ADFUsersGuide/page339.html`_.
+* GAMESS-UK - to get the list, ``grep "data yr" input.m`` if you have access to the source. Note that for E, it's split into "e1+" and "e1-" for instance.
+* Jaguar - to get the list, look at the examples in ``schrodinger/jaguar-whatever/samples`` if you have access to Jaguar. Note that for E, it's written as E1pp/Ap, for instance.
 * NWChem - if molecular symmetry is turned off or set to C1, symmetry adaption for orbitals is also deactivated, and can be explicitly turned on with `adapt on` in the SCF block
 
 Developers:
 
-* The use of a function with doctests for each of these cases is recommended, to make sure that the conversion is robust. There is a prototype called normalisesym() in logfileparser.py which should be overwritten in the subclasses if necessary (there is a unittest to make sure that this has been done).
-* The character tables `here <http://www.mpip-mainz.mpg.de/~gelessus/group.html>`_ may be useful in determining the correspondence between the labels used by the comp chem package and the commonly-used symbols.
+* The tests for these functions live in ``test/parser/testspecficparser.py``.
+* The character tables `here <http://symmetry.jacobs-university.de/>`_ may be useful in determining the correspondence between the labels used by the comp chem package and the commonly-used symbols.
 
 .. index::
     single: energy; mpenergies (attribute)
@@ -419,6 +426,8 @@ The attribute ``mpenergies`` holds the total molecule energies including Møller
 **Gaussian**: MP2 through MP5 energies are available using the ``MP`` keyword. For MP4 corrections, the energy with the most substitutions is used (SDTQ by default).
 
 **Jaguar**: the LMP2 is available.
+
+**ORCA**: MP2 and MP3 are available. The MP2 module can be called with the ``MP2`` keyword; while MP3 corrections are included in the matrix driven configuration interaction (MDCI) module through the ``MP3`` keyword.
 
 mult
 ----
@@ -478,6 +487,26 @@ or by providing the corresponding argument to ``ccopen``,
     from cclib.parser import ccopen
     parser = ccopen("filename", optdone_as_list=True) # could also do future=True instead of optdone_as_list
     data = parser.parse()
+
+scancoords
+----------
+
+An array containing the geometries for each step of shape `(number of scan steps, number of atoms, 3)`. In the case of an unrelaxed scan this is equivalent to `atomcoords`, however this is not the case for a relaxed scan as a geometry optimization is performed at each scan step.
+
+scanenergies
+------------
+
+A list containing the energies at each point of the scan. As with `scancoords`, `scanenergies` is only equivalent to `[scf,mp,cc]energies` in the case of an unrelaxed scan of the scf, mp, and/or cc potential energy surface.
+
+scannames
+_________
+
+A list containing the names of each parameter scanned.
+
+scanparm
+________
+
+A list of lists where each list contains the values scanned for each parameter in `scannames`. 
 
 scfenergies
 -----------

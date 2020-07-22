@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017, the cclib development team
+# Copyright (c) 2020, the cclib development team
 #
 # This file is part of cclib (http://cclib.github.io) and is distributed under
 # the terms of the BSD 3-Clause License.
@@ -108,10 +108,15 @@ class DALTON(logfileparser.Logfile):
                   r"(?:[\s,]\(?)?")
             match = re.search(rs, line)
             if match:
-                self.metadata["package_version"] = match.groups()[0]
+                package_version = match.groups()[0]
+                self.metadata["package_version"] = package_version
+                self.metadata["legacy_package_version"] = package_version
         # Don't add revision information to the main package version for now.
         if "Last Git revision" in line:
             revision = line.split()[4]
+            package_version = self.metadata.get("package_version")
+            if package_version:
+                self.metadata["package_version"] = "{}+{}".format(package_version, revision)
 
         # Is the basis set from a single library file, or is it
         # manually specified? See before_parsing().
@@ -145,7 +150,7 @@ class DALTON(logfileparser.Logfile):
                 self.geotargets = []
                 self.geotargets_names = []
 
-            target = self.float(line.split()[-1])
+            target = utils.float(line.split()[-1])
             name = line.strip()[25:].split()[0]
 
             self.geotargets.append(target)
@@ -566,7 +571,7 @@ class DALTON(logfileparser.Logfile):
         if "Threshold for SCF convergence" in line:
             if not hasattr(self, "scftargets"):
                 self.scftargets = []
-            scftarget = self.float(line.split()[-1])
+            scftarget = utils.float(line.split()[-1])
             self.scftargets.append([scftarget])
 
         #      Wave function specification
@@ -661,7 +666,7 @@ class DALTON(logfileparser.Logfile):
                 strcompare = "@{0:>3d}".format(iteration)
                 if strcompare in line:
                     temp = line.split()
-                    error_norm = self.float(temp[3])
+                    error_norm = utils.float(temp[3])
                     values.append([error_norm])
 
                 if line[0] == "@" and "converged in" in line:
@@ -823,19 +828,34 @@ class DALTON(logfileparser.Logfile):
             self.mpenergies.append([])
             self.mpenergies[-1].append(energ)
 
-        if "Total CCSD  energy:" in line:
-            self.metadata["methods"].append("CCSD")
-            energ = utils.convertor(float(line.split()[-1]), 'hartree', 'eV')
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
-            self.ccenergies.append(energ)
+        if "Starting in Coupled Cluster Section (CC)" in line:
+            self.section = "CC"
 
-        if "Total energy CCSD(T)" in line:
-            self.metadata["methods"].append("CCSD(T)")
-            energ = utils.convertor(float(line.split()[-1]), 'hartree', 'eV')
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
-            self.ccenergies.append(energ)
+        if self.section == "CC" and "SUMMARY OF COUPLED CLUSTER CALCULATION" in line:
+            ccenergies = []
+            while "END OF COUPLED CLUSTER CALCULATION" not in line:
+                if "Total MP2   energy" in line:
+                    # If **WAVE FUNCTIONS\n.MP2 was specified, don't double-add this.
+                    if not hasattr(self, "mpenergies") or \
+                       not len(self.mpenergies) == len(self.scfenergies):
+                        self.append_attribute(
+                            "mpenergies",
+                            [utils.convertor(float(line.split()[-1]), "hartree", "eV")]
+                        )
+                if "Total CCSD  energy:" in line:
+                    self.metadata["methods"].append("CCSD")
+                    ccenergies.append(float(line.split()[-1]))
+                if "Total energy CCSD(T)" in line:
+                    self.metadata["methods"].append("CCSD(T)")
+                    ccenergies.append(float(line.split()[-1]))
+                line = next(inputfile)
+            if ccenergies:
+                self.append_attribute(
+                    "ccenergies", utils.convertor(ccenergies[-1], "hartree", "eV")
+                )
+
+        if "Tau1 diagnostic" in line:
+            self.metadata["t1_diagnostic"] = float(line.split()[-1])
 
         # The molecular geometry requires the use of .RUN PROPERTIES in the input.
         # Note that the second column is not the nuclear charge, but the atom type
@@ -932,11 +952,11 @@ class DALTON(logfileparser.Logfile):
             while line.strip():
                 if iteration == 0 and "Energy at this geometry" in line:
                     index = self.geotargets_names.index('energy')
-                    values[index] = self.float(line.split()[-1])
+                    values[index] = utils.float(line.split()[-1])
                 for tgt, lbl in targets_labels.items():
                     if lbl in line and tgt in self.geotargets_names:
                         index = self.geotargets_names.index(tgt)
-                        values[index] = self.float(line.split()[-1])
+                        values[index] = utils.float(line.split()[-1])
                 line = next(inputfile)
 
             # If we're missing something above, throw away the partial geovalues since
@@ -1082,7 +1102,7 @@ class DALTON(logfileparser.Logfile):
 
             vibramans = []
 
-            # The Raman intensities appear under the "Pol.Int."
+            # The Raman activities appear under the "Pol.Int."
             # (polarization intensity) column.
             for m in range(len(self.vibfreqs)):
                 vibramans.append(float(line.split()[4]))
@@ -1138,7 +1158,7 @@ class DALTON(logfileparser.Logfile):
                     if not hasattr(self, 'polarizabilities'):
                         self.polarizabilities = []
                     i, j = coord_to_idx[tokens[2][0]], coord_to_idx[tokens[4][0]]
-                    polarizability_diplen[i, j] = self.float(tokens[7])
+                    polarizability_diplen[i, j] = utils.float(tokens[7])
                 line = next(inputfile)
 
             polarizability_diplen = utils.symmetrize(polarizability_diplen, use_triangle='upper')
@@ -1200,7 +1220,7 @@ class DALTON(logfileparser.Logfile):
                     etsyms.append(symmap[do_triplet] + "-" + etsym)
                     self.skip_lines(inputfile, ["d", "b", "Excitation energy in a.u."])
                     line = next(inputfile)
-                    etenergies.append(self.float(line.split()[3]))
+                    etenergies.append(utils.float(line.split()[3]))
                     self.skip_lines(inputfile, ["b", "@ Total energy", "b"])
 
                 if line.startswith("@ Operator type:"):
@@ -1208,7 +1228,7 @@ class DALTON(logfileparser.Logfile):
                     assert line.startswith("@ Oscillator strength")
                     if etosc_key not in etoscs:
                         etoscs[etosc_key] = 0.0
-                    etoscs[etosc_key] += self.float(line.split()[5])
+                    etoscs[etosc_key] += utils.float(line.split()[5])
                     self.skip_line(inputfile, "b")
 
                 # To understand why the "PBHT MO Overlap Diagnostic" section
